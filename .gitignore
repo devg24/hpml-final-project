@@ -1,4 +1,5 @@
-# Ignore model weights and cacheswen-7b/
+# Ignore model weights and caches
+qwen-7b
 qwen-7b/
 *.safetensors
 *.bin
