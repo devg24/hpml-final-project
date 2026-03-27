@@ -1,0 +1,15 @@
+# Ignore model weights and cacheswen-7b/
+qwen-7b/
+*.safetensors
+*.bin
+*.h5
+.huggingface/
+
+# Ignore Nsight Compute Profiling Traces
+*.ncu-rep
+*.nsys-rep
+
+# Ignore Python/OS caches
+__pycache__/
+*.pyc
+.DS_Store
