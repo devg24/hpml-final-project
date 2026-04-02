@@ -1,5 +1,6 @@
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BaseStreamer
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.generation.streamers import BaseStreamer
 import asyncio
 import time
 import wandb
@@ -14,6 +15,7 @@ MODEL_PATH = "./qwen-7b"
 WANDB_PROJECT = "hpml-final-project"
 CONCURRENT_AGENTS = 5 # Scale to 15, 30, 50 to force OOM
 MAX_NEW_TOKENS = 256
+DEVICE = "cuda:0" # <-- Added explicit device
 
 # --- File Paths ---
 AGENTS_FILE = "agents_config.json"
@@ -55,7 +57,7 @@ print("Loading Model and Tokenizer into VRAM...")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_PATH,
-    device_map="auto", 
+    device_map=DEVICE, # <-- Changed from "auto" to DEVICE
     torch_dtype=torch.bfloat16, 
     trust_remote_code=True
 )
@@ -66,7 +68,7 @@ print("Model loaded successfully.")
 def generate_review(agent_id: int, task_prompt: str):
     """Synchronous generation function to be executed concurrently."""
     full_prompt = f"System: {task_prompt}\n\nCode:\n{SHARED_CODE_PREFIX}\n\nReview:"
-    inputs = tokenizer(full_prompt, return_tensors="pt").to("cuda")
+    inputs = tokenizer(full_prompt, return_tensors="pt").to(DEVICE) # <-- Changed from "cuda" to DEVICE
     
     streamer = TTFTStreamer()
     start_time = time.time()
