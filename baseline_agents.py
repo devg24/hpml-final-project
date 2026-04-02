@@ -6,6 +6,8 @@ import wandb
 import traceback
 import json
 import os
+import torch.nn.modules.module as module
+import inspect
 
 # --- Configuration ---
 MODEL_PATH = "./qwen-7b" 
@@ -14,20 +16,20 @@ CONCURRENT_AGENTS = 5 # Scale to 15, 30, 50 to force OOM
 MAX_NEW_TOKENS = 256
 
 # --- File Paths ---
-PREFIX_FILE = "shared_prefix.py" # Put your massive module.py clone here
 AGENTS_FILE = "agents_config.json"
 
 # --- Load External Data ---
-print(f"Loading workload from {PREFIX_FILE} and {AGENTS_FILE}...")
+print(f"Loading workload from {AGENTS_FILE}...")
 
-if not os.path.exists(PREFIX_FILE) or not os.path.exists(AGENTS_FILE):
-    raise FileNotFoundError("Ensure both 'shared_prefix.py' and 'agents_config.json' exist in the directory.")
+if not os.path.exists(AGENTS_FILE):
+    raise FileNotFoundError("Ensure 'agents_config.json' exists in the directory.")
 
-with open(PREFIX_FILE, "r") as f:
-    SHARED_CODE_PREFIX = f.read()
+SHARED_CODE_PREFIX = inspect.getsource(module) 
 
 with open(AGENTS_FILE, "r") as f:
-    ALL_AGENTS = json.load(f)
+    ALL_AGENTS = json.load(f).get("agents", [])
+print(SHARED_CODE_PREFIX[:500], "\n...\n")  # Print the first 500 characters of the prefix for verification
+print(ALL_AGENTS[:2], "\n...\n")  # Print the first 2 agent profiles for verification
 
 print(f"Loaded prefix length: {len(SHARED_CODE_PREFIX)} characters.")
 print(f"Loaded {len(ALL_AGENTS)} agent profiles.")
