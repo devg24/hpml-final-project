@@ -14,3 +14,4 @@ qwen-7b/
 __pycache__/
 *.pyc
 .DS_Store
+wandb/
