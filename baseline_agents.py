@@ -4,26 +4,33 @@ import asyncio
 import time
 import wandb
 import traceback
+import json
+import os
 
 # --- Configuration ---
-# Update this to point to your local symlink in the VM (e.g., "./qwen-7b-model")
 MODEL_PATH = "./qwen-7b" 
 WANDB_PROJECT = "hpml-final-project"
-CONCURRENT_AGENTS = 5 # Start small (e.g., 5), then scale to 15, 30, 50 to force OOM
+CONCURRENT_AGENTS = 5 # Scale to 15, 30, 50 to force OOM
 MAX_NEW_TOKENS = 256
 
-# --- Mock Data ---
-# A dummy 2,000-line equivalent code prefix
-SHARED_CODE_PREFIX = "def example_function():\n    pass\n" * 2000
+# --- File Paths ---
+PREFIX_FILE = "shared_prefix.py" # Put your massive module.py clone here
+AGENTS_FILE = "agents_config.json"
 
-# Distinct agent personas (The "Unique Suffixes")
-AGENT_TASKS = [
-    "Review the above code for security vulnerabilities.",
-    "Review the above code for PEP8 style compliance and readability.",
-    "Review the above code for time and space complexity optimizations.",
-    "Generate comprehensive docstrings for the above code.",
-    "Identify any potential race conditions or concurrency issues in the above code."
-] * 10 # Multiply to allow up to 50 concurrent agents
+# --- Load External Data ---
+print(f"Loading workload from {PREFIX_FILE} and {AGENTS_FILE}...")
+
+if not os.path.exists(PREFIX_FILE) or not os.path.exists(AGENTS_FILE):
+    raise FileNotFoundError("Ensure both 'shared_prefix.py' and 'agents_config.json' exist in the directory.")
+
+with open(PREFIX_FILE, "r") as f:
+    SHARED_CODE_PREFIX = f.read()
+
+with open(AGENTS_FILE, "r") as f:
+    ALL_AGENTS = json.load(f)
+
+print(f"Loaded prefix length: {len(SHARED_CODE_PREFIX)} characters.")
+print(f"Loaded {len(ALL_AGENTS)} agent profiles.")
 
 # --- Custom Streamer for TTFT ---
 class TTFTStreamer(BaseStreamer):
@@ -46,8 +53,8 @@ print("Loading Model and Tokenizer into VRAM...")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_PATH,
-    device_map="auto", # Automatically places it on the L4 GPU
-    torch_dtype=torch.bfloat16, # Crucial for fitting 7B on 24GB VRAM
+    device_map="auto", 
+    torch_dtype=torch.bfloat16, 
     trust_remote_code=True
 )
 model.eval()
@@ -106,29 +113,30 @@ def generate_review(agent_id: int, task_prompt: str):
 
 # --- Async Coordinator ---
 async def main():
+    # Ensure we don't request more agents than we have configured
+    actual_agents_to_run = min(CONCURRENT_AGENTS, len(ALL_AGENTS))
+    
     wandb.init(
         project=WANDB_PROJECT,
-        name=f"baseline_naive_hf_{CONCURRENT_AGENTS}_agents",
+        name=f"baseline_naive_hf_{actual_agents_to_run}_agents",
         config={
             "model": "Qwen-7B-Instruct",
             "framework": "HuggingFace-PyTorch",
-            "concurrent_agents": CONCURRENT_AGENTS,
+            "concurrent_agents": actual_agents_to_run,
             "prefix_length_approx": len(SHARED_CODE_PREFIX),
             "max_new_tokens": MAX_NEW_TOKENS
         }
     )
     
-    print(f"Starting simulation with {CONCURRENT_AGENTS} concurrent agents...")
+    print(f"Starting simulation with {actual_agents_to_run} concurrent agents...")
     
-    # Select the required number of agent tasks
-    tasks_to_run = AGENT_TASKS[:CONCURRENT_AGENTS]
+    # Slice the loaded JSON list
+    agents_to_run = ALL_AGENTS[:actual_agents_to_run]
     
-    # Wrap the synchronous generate function in asyncio.to_thread to simulate concurrency.
-    # Note: PyTorch releases the GIL during C++ execution, so these WILL hit the GPU concurrently,
-    # causing the massive memory fragmentation/OOM you want to document.
+    # Wrap the synchronous generate function in asyncio.to_thread
     tasks = [
-        asyncio.to_thread(generate_review, i, task_prompt) 
-        for i, task_prompt in enumerate(tasks_to_run)
+        asyncio.to_thread(generate_review, agent["id"], agent["persona"]) 
+        for agent in agents_to_run
     ]
     
     results = await asyncio.gather(*tasks)
@@ -157,15 +165,15 @@ async def main():
         avg_throughput /= successful_runs
         
     print("\n--- Simulation Complete ---")
-    print(f"Successful Runs: {successful_runs}/{CONCURRENT_AGENTS}")
-    print(f"OOM Crashes: {oom_crashes}/{CONCURRENT_AGENTS}")
+    print(f"Successful Runs: {successful_runs}/{actual_agents_to_run}")
+    print(f"OOM Crashes: {oom_crashes}/{actual_agents_to_run}")
     if successful_runs > 0:
         print(f"Average TTFT: {avg_ttft:.2f}s")
         print(f"Average Throughput: {avg_throughput:.2f} tokens/s")
 
     # Log aggregate metrics to WandB
     wandb.log({
-        "aggregate/success_rate": successful_runs / CONCURRENT_AGENTS,
+        "aggregate/success_rate": successful_runs / actual_agents_to_run,
         "aggregate/oom_count": oom_crashes,
         "aggregate/avg_ttft": avg_ttft,
         "aggregate/avg_throughput": avg_throughput
