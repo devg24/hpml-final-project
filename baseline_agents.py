@@ -121,6 +121,7 @@ async def main():
     actual_agents_to_run = min(CONCURRENT_AGENTS, len(ALL_AGENTS))
     
     wandb.init(
+        entity="ak5446-columbia-university",
         project=WANDB_PROJECT,
         name=f"baseline_naive_hf_{actual_agents_to_run}_agents",
         config={
