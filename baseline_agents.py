@@ -7,16 +7,17 @@ import wandb
 import traceback
 import json
 import os
-import torch.nn.functional as F
 import inspect
-import numpy as np
+import torch.nn.modules.module as module
 
 # --- Configuration ---
 MODEL_PATH = "./qwen-7b" 
 WANDB_PROJECT = "hpml-final-project"
-CONCURRENT_AGENTS = 5 # Scale to 15, 30, 50 to force OOM
+CONCURRENT_AGENTS = 15
 MAX_NEW_TOKENS = 256
-DEVICE = "cuda:0" # <-- Added explicit device
+DEVICE = "cuda:0" 
+# MAX_INPUT_TOKENS = 1020     # <-- Controls max INPUT length (Prompt + Code)
+
 
 # --- File Paths ---
 AGENTS_FILE = "agents_config.json"
@@ -27,12 +28,11 @@ print(f"Loading workload from {AGENTS_FILE}...")
 if not os.path.exists(AGENTS_FILE):
     raise FileNotFoundError("Ensure 'agents_config.json' exists in the directory.")
 
-SHARED_CODE_PREFIX = inspect.getsource(module) 
+SHARED_CODE_PREFIX = inspect.getsource(module)
+SHARED_CODE_PREFIX = "\n".join(SHARED_CODE_PREFIX.splitlines()[:110])
 
 with open(AGENTS_FILE, "r") as f:
     ALL_AGENTS = json.load(f).get("agents", [])
-print(SHARED_CODE_PREFIX[:500], "\n...\n")  # Print the first 500 characters of the prefix for verification
-print(ALL_AGENTS[:2], "\n...\n")  # Print the first 2 agent profiles for verification
 
 print(f"Loaded prefix length: {len(SHARED_CODE_PREFIX)} characters.")
 print(f"Loaded {len(ALL_AGENTS)} agent profiles.")
@@ -55,41 +55,74 @@ class TTFTStreamer(BaseStreamer):
 
 # --- Model Initialization ---
 print("Loading Model and Tokenizer into VRAM...")
-tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
+tokenizer = AutoTokenizer.from_pretrained(
+    MODEL_PATH, 
+    trust_remote_code=True,
+)
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_PATH,
-    device_map=DEVICE, # <-- Changed from "auto" to DEVICE
-    torch_dtype=torch.bfloat16, 
+    device_map=DEVICE, 
+    dtype=torch.bfloat16, # 16-bit precision to fit the 22GB GPU
     trust_remote_code=True
+   
 )
 model.eval()
 print("Model loaded successfully.")
 
-# --- Perplexity Helper ---
-def calculate_perplexity(model, input_ids, labels=None):
-    """Calculates perplexity for given input_ids, optionally masking the prompt."""
+# --- OOM-Safe Perplexity Helper ---
+def calculate_perplexity(model, input_ids, labels=None, max_chunk_size=2048):
+    """Calculates perplexity, chunking long sequences to prevent OOM."""
+    seq_len = input_ids.size(1)
+    
     with torch.no_grad():
-        # If labels are provided, loss is only calculated on non-masked tokens (-100)
-        outputs = model(input_ids, labels=labels if labels is not None else input_ids)
-        loss = outputs.loss
-        return torch.exp(loss).item()
+        # Fast path for short sequences
+        if seq_len <= max_chunk_size:
+            outputs = model(input_ids, labels=labels if labels is not None else input_ids)
+            return torch.exp(outputs.loss).item()
+            
+        # Safe chunking path for massive sequences
+        nlls = []
+        valid_tokens = 0
+        
+        for i in range(0, seq_len, max_chunk_size):
+            chunk_inputs = input_ids[:, i:i + max_chunk_size]
+            chunk_labels = labels[:, i:i + max_chunk_size] if labels is not None else chunk_inputs
+            
+            outputs = model(chunk_inputs, labels=chunk_labels)
+            
+            active_tokens = (chunk_labels != -100).sum().item()
+            if active_tokens > 0:
+                nlls.append(outputs.loss.item() * active_tokens)
+                valid_tokens += active_tokens
+        
+        if valid_tokens == 0:
+            return 0.0
+            
+        avg_loss = sum(nlls) / valid_tokens
+        return torch.exp(torch.tensor(avg_loss)).item()
 
 # --- Generation Function (Runs in Thread) ---
 def generate_review(agent_id: int, task_prompt: str):
     """Synchronous generation function to be executed concurrently."""
-    full_prompt = f"System: {task_prompt}\n\nCode:\n{SHARED_CODE_PREFIX}\n\nReview:"
-    inputs = tokenizer(full_prompt, return_tensors="pt").to(DEVICE)
+    full_prompt = f"Code:\n{SHARED_CODE_PREFIX}\n\nSystem: {task_prompt}\n\nReview:"
+    
+    # NEW: Apply the input token limit with truncation
+    inputs = tokenizer(
+        full_prompt, 
+        return_tensors="pt"
+        # truncation=True,                # <-- Turn on truncation
+        # max_length=MAX_INPUT_TOKENS      # <-- Apply the limit here
+    ).to(DEVICE)
 
     streamer = TTFTStreamer()
     start_time = time.time()
 
     cuda_stream = torch.cuda.Stream()
     try:
-        # Each agent gets its own CUDA stream for true concurrent kernel execution
         with torch.cuda.stream(cuda_stream):
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=MAX_NEW_TOKENS,
+                max_new_tokens=MAX_NEW_TOKENS, # <-- Output limit applied here
                 streamer=streamer,
                 do_sample=True,
                 temperature=0.7,
@@ -97,7 +130,6 @@ def generate_review(agent_id: int, task_prompt: str):
             )
         end_time = time.time()
         
-        # Calculate Metrics
         total_time = end_time - start_time
         ttft = streamer.first_token_time - start_time if streamer.first_token_time else total_time
         
@@ -105,11 +137,8 @@ def generate_review(agent_id: int, task_prompt: str):
         output_tokens = len(outputs[0]) - input_len
         throughput = output_tokens / total_time
         
-        # Calculate Generation Perplexity (mask the prompt)
-        full_ids = outputs[0].unsqueeze(0)
-        labels = full_ids.clone()
-        labels[:, :input_len] = -100
-        gen_ppl = calculate_perplexity(model, full_ids, labels=labels)
+        # Ship the tensor to the CPU immediately to free up GPU VRAM!
+        full_ids_cpu = outputs[0].unsqueeze(0).cpu()
         
         return {
             "agent_id": agent_id,
@@ -118,11 +147,11 @@ def generate_review(agent_id: int, task_prompt: str):
             "throughput_tps": throughput,
             "total_time_seconds": total_time,
             "output_tokens": output_tokens,
-            "perplexity": gen_ppl
+            "full_ids_cpu": full_ids_cpu, 
+            "input_len": input_len        
         }
         
     except torch.cuda.OutOfMemoryError:
-        # Catch OOM to prevent the entire script from silently crashing
         torch.cuda.empty_cache()
         return {
             "agent_id": agent_id,
@@ -138,7 +167,6 @@ def generate_review(agent_id: int, task_prompt: str):
 
 # --- Async Coordinator ---
 async def main():
-    # Ensure we don't request more agents than we have configured
     actual_agents_to_run = min(CONCURRENT_AGENTS, len(ALL_AGENTS))
     
     wandb.init(
@@ -155,11 +183,8 @@ async def main():
     )
     
     print(f"Starting simulation with {actual_agents_to_run} concurrent agents...")
-    
-    # Slice the loaded JSON list
     agents_to_run = ALL_AGENTS[:actual_agents_to_run]
     
-    # Wrap the synchronous generate function in asyncio.to_thread
     tasks = [
         asyncio.to_thread(generate_review, agent["id"], agent["persona"]) 
         for agent in agents_to_run
@@ -173,6 +198,26 @@ async def main():
 
     results = await asyncio.gather(*tasks)
     
+    # Sequential Perplexity Calculation
+    print("\nCalculating Perplexity for successful generations sequentially...")
+    for res in results:
+        if res["status"] == "success":
+            full_ids = res["full_ids_cpu"].to(DEVICE)
+            input_len = res["input_len"]
+            
+            labels = full_ids.clone()
+            labels[:, :input_len] = -100
+            
+            res["perplexity"] = calculate_perplexity(model, full_ids, labels=labels)
+            
+            # Nuke tensors from GPU
+            del full_ids
+            del labels
+            torch.cuda.empty_cache() 
+            
+            print(f"Agent {res['agent_id']} Perplexity: {res['perplexity']:.4f}")
+            del res["full_ids_cpu"] 
+            
     # Process and log results
     successful_runs = 0
     oom_crashes = 0
@@ -205,7 +250,6 @@ async def main():
         print(f"Average TTFT: {avg_ttft:.2f}s")
         print(f"Average Throughput: {avg_throughput:.2f} tokens/s")
 
-    # Log aggregate metrics to WandB
     total_avg_ppl = 0
     if successful_runs > 0:
         total_avg_ppl = sum(res["perplexity"] for res in results if res["status"] == "success") / successful_runs
