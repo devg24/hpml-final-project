@@ -68,21 +68,23 @@ print("Model loaded successfully.")
 def generate_review(agent_id: int, task_prompt: str):
     """Synchronous generation function to be executed concurrently."""
     full_prompt = f"System: {task_prompt}\n\nCode:\n{SHARED_CODE_PREFIX}\n\nReview:"
-    inputs = tokenizer(full_prompt, return_tensors="pt").to(DEVICE) # <-- Changed from "cuda" to DEVICE
-    
+    inputs = tokenizer(full_prompt, return_tensors="pt").to(DEVICE)
+
     streamer = TTFTStreamer()
     start_time = time.time()
-    
+
+    cuda_stream = torch.cuda.Stream()
     try:
-        # Naive synchronous generation
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=MAX_NEW_TOKENS,
-            streamer=streamer,
-            do_sample=True,
-            temperature=0.7,
-            pad_token_id=tokenizer.eos_token_id
-        )
+        # Each agent gets its own CUDA stream for true concurrent kernel execution
+        with torch.cuda.stream(cuda_stream):
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=MAX_NEW_TOKENS,
+                streamer=streamer,
+                do_sample=True,
+                temperature=0.7,
+                pad_token_id=tokenizer.eos_token_id
+            )
         end_time = time.time()
         
         # Calculate Metrics
