@@ -1,5 +1,5 @@
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from transformers.generation.streamers import BaseStreamer
 import asyncio
 import time
@@ -8,14 +8,21 @@ import traceback
 import json
 import os
 import inspect
+import argparse
 import torch.nn.modules.module as module
 
+# --- Args ---
+parser = argparse.ArgumentParser()
+parser.add_argument("--optim", type=str, default="none", choices=["none", "quantization"],
+                    help="Optimization to apply: 'none' (default bfloat16) or 'quantization' (INT4 NF4)")
+args = parser.parse_args()
+
 # --- Configuration ---
-MODEL_PATH = "./qwen-7b" 
+MODEL_PATH = "./qwen-7b"
 WANDB_PROJECT = "hpml-final-project"
 CONCURRENT_AGENTS = 15
 MAX_NEW_TOKENS = 256
-DEVICE = "cuda:0" 
+DEVICE = "cuda:0"
 # MAX_INPUT_TOKENS = 1020     # <-- Controls max INPUT length (Prompt + Code)
 
 
@@ -29,7 +36,7 @@ if not os.path.exists(AGENTS_FILE):
     raise FileNotFoundError("Ensure 'agents_config.json' exists in the directory.")
 
 SHARED_CODE_PREFIX = inspect.getsource(module)
-SHARED_CODE_PREFIX = "\n".join(SHARED_CODE_PREFIX.splitlines()[:110])
+SHARED_CODE_PREFIX = "\n".join(SHARED_CODE_PREFIX.splitlines()[:600])
 
 with open(AGENTS_FILE, "r") as f:
     ALL_AGENTS = json.load(f).get("agents", [])
@@ -54,18 +61,29 @@ class TTFTStreamer(BaseStreamer):
         pass
 
 # --- Model Initialization ---
-print("Loading Model and Tokenizer into VRAM...")
-tokenizer = AutoTokenizer.from_pretrained(
-    MODEL_PATH, 
-    trust_remote_code=True,
-)
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_PATH,
-    device_map=DEVICE, 
-    dtype=torch.bfloat16, # 16-bit precision to fit the 22GB GPU
-    trust_remote_code=True
-   
-)
+print(f"Loading Model and Tokenizer into VRAM (optim={args.optim})...")
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
+
+if args.optim == "quantization":
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",           # NF4 format — fused kernel, no dequant buffer
+        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_use_double_quant=True,      # quantize the quantization constants too
+    )
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_PATH,
+        quantization_config=bnb_config,
+        device_map="auto",
+        trust_remote_code=True
+    )
+else:
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_PATH,
+        device_map=DEVICE,
+        dtype=torch.bfloat16,
+        trust_remote_code=True
+    )
 model.eval()
 print("Model loaded successfully.")
 
@@ -124,8 +142,7 @@ def generate_review(agent_id: int, task_prompt: str):
                 **inputs,
                 max_new_tokens=MAX_NEW_TOKENS, # <-- Output limit applied here
                 streamer=streamer,
-                do_sample=True,
-                temperature=0.7,
+                do_sample=False,
                 pad_token_id=tokenizer.eos_token_id
             )
         end_time = time.time()
@@ -172,10 +189,11 @@ async def main():
     wandb.init(
         entity="ak5446-columbia-university",
         project=WANDB_PROJECT,
-        name=f"baseline_naive_hf_{actual_agents_to_run}_agents",
+        name=f"baseline_{args.optim}_hf_{actual_agents_to_run}_agents",
         config={
             "model": "Qwen-7B-Instruct",
             "framework": "HuggingFace-PyTorch",
+            "optim": args.optim,
             "concurrent_agents": actual_agents_to_run,
             "prefix_length_approx": len(SHARED_CODE_PREFIX),
             "max_new_tokens": MAX_NEW_TOKENS
