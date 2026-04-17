@@ -7,8 +7,9 @@ import wandb
 import traceback
 import json
 import os
-import torch.nn.modules.module as module
+import torch.nn.functional as F
 import inspect
+import numpy as np
 
 # --- Configuration ---
 MODEL_PATH = "./qwen-7b" 
@@ -64,6 +65,15 @@ model = AutoModelForCausalLM.from_pretrained(
 model.eval()
 print("Model loaded successfully.")
 
+# --- Perplexity Helper ---
+def calculate_perplexity(model, input_ids, labels=None):
+    """Calculates perplexity for given input_ids, optionally masking the prompt."""
+    with torch.no_grad():
+        # If labels are provided, loss is only calculated on non-masked tokens (-100)
+        outputs = model(input_ids, labels=labels if labels is not None else input_ids)
+        loss = outputs.loss
+        return torch.exp(loss).item()
+
 # --- Generation Function (Runs in Thread) ---
 def generate_review(agent_id: int, task_prompt: str):
     """Synchronous generation function to be executed concurrently."""
@@ -90,8 +100,16 @@ def generate_review(agent_id: int, task_prompt: str):
         # Calculate Metrics
         total_time = end_time - start_time
         ttft = streamer.first_token_time - start_time if streamer.first_token_time else total_time
-        output_tokens = len(outputs[0]) - len(inputs["input_ids"][0])
+        
+        input_len = inputs["input_ids"].shape[-1]
+        output_tokens = len(outputs[0]) - input_len
         throughput = output_tokens / total_time
+        
+        # Calculate Generation Perplexity (mask the prompt)
+        full_ids = outputs[0].unsqueeze(0)
+        labels = full_ids.clone()
+        labels[:, :input_len] = -100
+        gen_ppl = calculate_perplexity(model, full_ids, labels=labels)
         
         return {
             "agent_id": agent_id,
@@ -99,7 +117,8 @@ def generate_review(agent_id: int, task_prompt: str):
             "ttft_seconds": ttft,
             "throughput_tps": throughput,
             "total_time_seconds": total_time,
-            "output_tokens": output_tokens
+            "output_tokens": output_tokens,
+            "perplexity": gen_ppl
         }
         
     except torch.cuda.OutOfMemoryError:
@@ -146,6 +165,12 @@ async def main():
         for agent in agents_to_run
     ]
     
+    # Calculate static Base Code Perplexity
+    print("Calculating Base Code Perplexity...")
+    base_code_inputs = tokenizer(SHARED_CODE_PREFIX, return_tensors="pt").to(DEVICE)
+    base_ppl = calculate_perplexity(model, base_code_inputs["input_ids"])
+    print(f"Base Code Perplexity: {base_ppl:.4f}")
+
     results = await asyncio.gather(*tasks)
     
     # Process and log results
@@ -159,9 +184,11 @@ async def main():
             successful_runs += 1
             avg_ttft += res["ttft_seconds"]
             avg_throughput += res["throughput_tps"]
+            avg_ppl = res.get("perplexity", 0)
             wandb.log({
                 f"agent_{res['agent_id']}/ttft": res["ttft_seconds"],
-                f"agent_{res['agent_id']}/throughput": res["throughput_tps"]
+                f"agent_{res['agent_id']}/throughput": res["throughput_tps"],
+                f"agent_{res['agent_id']}/perplexity": avg_ppl
             })
         elif res["status"] == "OOM_ERROR":
             oom_crashes += 1
@@ -179,11 +206,17 @@ async def main():
         print(f"Average Throughput: {avg_throughput:.2f} tokens/s")
 
     # Log aggregate metrics to WandB
+    total_avg_ppl = 0
+    if successful_runs > 0:
+        total_avg_ppl = sum(res["perplexity"] for res in results if res["status"] == "success") / successful_runs
+
     wandb.log({
         "aggregate/success_rate": successful_runs / actual_agents_to_run,
         "aggregate/oom_count": oom_crashes,
         "aggregate/avg_ttft": avg_ttft,
-        "aggregate/avg_throughput": avg_throughput
+        "aggregate/avg_throughput": avg_throughput,
+        "aggregate/avg_perplexity": total_avg_ppl,
+        "aggregate/base_code_perplexity": base_ppl
     })
     
     wandb.finish()
