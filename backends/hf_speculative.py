@@ -9,7 +9,7 @@ Generation harness is identical to hf_baseline; only the model-load and generate
 import asyncio
 import time
 import traceback
-
+import concurrent.futures
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -137,9 +137,63 @@ def _generate_one(
 
 # ---------------------------------------------------------------------------
 # Public entry point
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+
 
 async def run_hf_speculative(cfg: ExperimentConfig) -> ExperimentResult:
+    torch.cuda.reset_peak_memory_stats(cfg.device)
+    target_model, draft_model, tokenizer = _load(cfg)
+
+    # Base-code perplexity
+    print(f"[{BACKEND_NAME}] Calculating base code perplexity ...")
+    device = next(target_model.parameters()).device
+    base_inputs = tokenizer(
+        cfg.shared_code_prefix, return_tensors="pt"
+    ).to(device)
+    base_ppl = calculate_perplexity(target_model, base_inputs["input_ids"])
+    print(f"[{BACKEND_NAME}] Base PPL: {base_ppl:.4f}")
+
+    # Dispatch all agents concurrently using exactly 50 max workers
+    wall_start = time.time()
+    loop = asyncio.get_running_loop()
+    
+    print(f"[{BACKEND_NAME}] Launching thread pool with max_workers=50...")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as pool:
+        tasks = [
+            loop.run_in_executor(
+                pool, 
+                _generate_one, 
+                agent, 
+                target_model, 
+                draft_model, 
+                tokenizer, 
+                cfg
+            )
+            for agent in cfg.agents
+        ]
+        raw = await asyncio.gather(*tasks)
+
+    # Sequential perplexity pass
+    print(f"[{BACKEND_NAME}] Computing per-agent perplexity ...")
+    pending = [(res, ids, ilen) for res, ids, ilen in raw]
+    agent_results = [res for res, _, _ in raw]
+    compute_generation_perplexities(target_model, agent_results, pending, str(device))
+
+    wall_time = time.time() - wall_start
+    peak_vram = torch.cuda.max_memory_allocated() / 1e9
+
+    del target_model
+    del draft_model
+    torch.cuda.empty_cache()
+
+    agg = compute_agg(agent_results, base_ppl, peak_vram, len(cfg.agents))
+    return ExperimentResult(
+        backend=BACKEND_NAME,
+        config=cfg,
+        agent_results=agent_results,
+        agg=agg,
+        wall_time_seconds=wall_time,
+    )
     torch.cuda.reset_peak_memory_stats(cfg.device)
     target_model, draft_model, tokenizer = _load(cfg)
 
