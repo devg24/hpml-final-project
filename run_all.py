@@ -25,6 +25,7 @@ from contracts import AgentSpec, ExperimentConfig
 from backends.hf_baseline  import run_hf_baseline
 from backends.hf_quantized import run_hf_quantized
 from backends.hf_speculative import run_speculative
+from backends.hf_vllm import run_vllm
 
 # ---------------------------------------------------------------------------
 # Backend registry  — add new backends here, nothing else needs to change
@@ -33,7 +34,7 @@ from backends.hf_speculative import run_speculative
 REGISTRY: dict[str, callable] = {
     "hf_bf16":     run_hf_baseline,
     "hf_nf4":      run_hf_quantized,
-    # "vllm":        run_vllm,       # coming soon
+    "vllm":        run_vllm,       # coming soon
     # "vllm_awq":    run_vllm_awq,   # coming soon
     "speculative": run_speculative, # coming soon
 }
