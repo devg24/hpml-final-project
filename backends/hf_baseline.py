@@ -148,9 +148,9 @@ async def run_hf_baseline(cfg: ExperimentConfig) -> ExperimentResult:
 
     # Sequential perplexity pass on generation outputs
     print(f"[{BACKEND_NAME}] Computing per-agent perplexity ...")
-    pending = [(res, ids, ilen) for res, ids, ilen in raw]
+    pending = list(raw)                          # list of (AgentResult, full_ids_cpu, input_len)
     agent_results = [res for res, _, _ in raw]
-    compute_generation_perplexities(model, agent_results, pending, cfg.device)
+    compute_generation_perplexities(pending, model, cfg.device)
 
     wall_time = time.time() - wall_start
     peak_vram = torch.cuda.max_memory_allocated(cfg.device) / 1e9

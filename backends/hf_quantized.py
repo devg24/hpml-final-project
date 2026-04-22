@@ -154,9 +154,9 @@ async def run_hf_quantized(cfg: ExperimentConfig) -> ExperimentResult:
 
     # Sequential perplexity pass
     print(f"[{BACKEND_NAME}] Computing per-agent perplexity ...")
-    pending = [(res, ids, ilen) for res, ids, ilen in raw]
+    pending = list(raw)
     agent_results = [res for res, _, _ in raw]
-    compute_generation_perplexities(model, agent_results, pending, str(device))
+    compute_generation_perplexities(pending, model, str(device))
 
     wall_time = time.time() - wall_start
     peak_vram = torch.cuda.max_memory_allocated() / 1e9  # "auto" may span devices
