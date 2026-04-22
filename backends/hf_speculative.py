@@ -3,13 +3,12 @@ backends/hf_speculative.py
 --------------------------
 HuggingFace Transformers inference using Speculative Decoding.
 Requires a smaller "draft" model to generate token proposals for the target model.
-Generation harness is identical to hf_baseline; only the model-load and generate paths differ.
 """
 
 import asyncio
+import concurrent.futures
 import time
 import traceback
-import concurrent.futures
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -41,7 +40,7 @@ def _load(cfg: ExperimentConfig):
     )
     target_model.eval()
     
-    # Load the draft model (assuming cfg.draft_model_path exists)
+    # Load the draft model
     print(f"[{BACKEND_NAME}] Loading draft model ({cfg.draft_model_path})...")
     draft_model = AutoModelForCausalLM.from_pretrained(
         cfg.draft_model_path,
@@ -56,11 +55,11 @@ def _load(cfg: ExperimentConfig):
 
 
 # ---------------------------------------------------------------------------
-# Single-agent generation  (synchronous — called inside a thread)
+# Single-agent generation (synchronous — called inside a thread)
 # ---------------------------------------------------------------------------
 
 def _generate_one(
-    agent: "AgentSpec",  # noqa: F821
+    agent,
     target_model,
     draft_model,
     tokenizer,
@@ -137,10 +136,9 @@ def _generate_one(
 
 # ---------------------------------------------------------------------------
 # Public entry point
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
-
-async def run_hf_speculative(cfg: ExperimentConfig) -> ExperimentResult:
+async def run_speculative(cfg: ExperimentConfig) -> ExperimentResult:
     torch.cuda.reset_peak_memory_stats(cfg.device)
     target_model, draft_model, tokenizer = _load(cfg)
 
@@ -153,76 +151,26 @@ async def run_hf_speculative(cfg: ExperimentConfig) -> ExperimentResult:
     base_ppl = calculate_perplexity(target_model, base_inputs["input_ids"])
     print(f"[{BACKEND_NAME}] Base PPL: {base_ppl:.4f}")
 
-    # Dispatch all agents concurrently using exactly 50 max workers
+    # Dispatch all agents concurrently with a custom executor
     wall_start = time.time()
     loop = asyncio.get_running_loop()
-    
-    print(f"[{BACKEND_NAME}] Launching thread pool with max_workers=50...")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(cfg.agents)) as executor:
         tasks = [
-            loop.run_in_executor(
-                pool, 
-                _generate_one, 
-                agent, 
-                target_model, 
-                draft_model, 
-                tokenizer, 
-                cfg
-            )
+            loop.run_in_executor(executor, _generate_one, agent, target_model, draft_model, tokenizer, cfg)
             for agent in cfg.agents
         ]
         raw = await asyncio.gather(*tasks)
 
     # Sequential perplexity pass
     print(f"[{BACKEND_NAME}] Computing per-agent perplexity ...")
-    pending = [(res, ids, ilen) for res, ids, ilen in raw]
+    pending = list(raw)
     agent_results = [res for res, _, _ in raw]
-    compute_generation_perplexities(target_model, agent_results, pending, str(device))
+    compute_generation_perplexities(pending, target_model, str(device))
 
     wall_time = time.time() - wall_start
     peak_vram = torch.cuda.max_memory_allocated() / 1e9
 
-    del target_model
-    del draft_model
-    torch.cuda.empty_cache()
-
-    agg = compute_agg(agent_results, base_ppl, peak_vram, len(cfg.agents))
-    return ExperimentResult(
-        backend=BACKEND_NAME,
-        config=cfg,
-        agent_results=agent_results,
-        agg=agg,
-        wall_time_seconds=wall_time,
-    )
-    torch.cuda.reset_peak_memory_stats(cfg.device)
-    target_model, draft_model, tokenizer = _load(cfg)
-
-    # Base-code perplexity (Only requires target model)
-    print(f"[{BACKEND_NAME}] Calculating base code perplexity ...")
-    device = next(target_model.parameters()).device
-    base_inputs = tokenizer(
-        cfg.shared_code_prefix, return_tensors="pt"
-    ).to(device)
-    base_ppl = calculate_perplexity(target_model, base_inputs["input_ids"])
-    print(f"[{BACKEND_NAME}] Base PPL: {base_ppl:.4f}")
-
-    # Dispatch all agents concurrently
-    wall_start = time.time()
-    tasks = [
-        asyncio.to_thread(_generate_one, agent, target_model, draft_model, tokenizer, cfg)
-        for agent in cfg.agents
-    ]
-    raw = await asyncio.gather(*tasks)
-
-    # Sequential perplexity pass (Only requires target model)
-    print(f"[{BACKEND_NAME}] Computing per-agent perplexity ...")
-    pending = [(res, ids, ilen) for res, ids, ilen in raw]
-    agent_results = [res for res, _, _ in raw]
-    compute_generation_perplexities(target_model, agent_results, pending, str(device))
-
-    wall_time = time.time() - wall_start
-    peak_vram = torch.cuda.max_memory_allocated() / 1e9
-
+    # Free memory
     del target_model
     del draft_model
     torch.cuda.empty_cache()

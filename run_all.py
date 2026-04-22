@@ -1,21 +1,28 @@
 """
 run_all.py
 ----------
-Orchestrator.  Loads shared setup, then runs each registered backend
-sequentially (one GPU — we free VRAM between experiments), logging
-every result to a shared WandB run.
-
-Usage:
-    python run_all.py                        # all backends, 50 agents
-    python run_all.py --backends hf_bf16 hf_nf4
-    python run_all.py --n-agents 15
+Orchestrator for HPML Final Project.
 """
+
+import os
+import sys
+
+# --- Fix for GLIBCXX mismatch on Debian 11 ---
+# vLLM/zmq require a newer libstdc++.so than the system provides.
+# We force the use of the libraries bundled with the conda environment.
+CONDA_PREFIX = os.environ.get("CONDA_PREFIX", "/opt/conda/envs/hpml_fp")
+LIB_PATH = os.path.join(CONDA_PREFIX, "lib")
+if LIB_PATH not in os.environ.get("LD_LIBRARY_PATH", ""):
+    os.environ["LD_LIBRARY_PATH"] = LIB_PATH + ":" + os.environ.get("LD_LIBRARY_PATH", "")
+    # In some environments, we might need to re-execute to ensure the linker picks up the change
+    if not os.environ.get("FIXED_LD_LIBRARY_PATH"):
+        os.environ["FIXED_LD_LIBRARY_PATH"] = "1"
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
 import argparse
 import asyncio
 import inspect
 import json
-import os
 
 import torch
 import wandb
@@ -28,19 +35,18 @@ from backends.hf_speculative import run_speculative
 from backends.hf_vllm import run_vllm
 
 # ---------------------------------------------------------------------------
-# Backend registry  — add new backends here, nothing else needs to change
+# Backend registry
 # ---------------------------------------------------------------------------
 
 REGISTRY: dict[str, callable] = {
     "hf_bf16":     run_hf_baseline,
     "hf_nf4":      run_hf_quantized,
-    "vllm":        run_vllm,       # coming soon
-    # "vllm_awq":    run_vllm_awq,   # coming soon
-    "speculative": run_speculative, # coming soon
+    "vllm":        run_vllm,
+    "speculative": run_speculative,
 }
 
 # ---------------------------------------------------------------------------
-# Config
+# Config defaults
 # ---------------------------------------------------------------------------
 
 MODEL_PATH      = "./qwen-7b"
@@ -51,23 +57,16 @@ MAX_NEW_TOKENS  = 256
 DEVICE          = "cuda"
 
 # ---------------------------------------------------------------------------
-# Shared code prefix  (same as original — first 600 lines of torch.nn.Module)
+# Helpers
 # ---------------------------------------------------------------------------
 
 def _load_code_prefix() -> str:
     src = inspect.getsource(module)
     return "\n".join(src.splitlines()[:600])
 
-
-# ---------------------------------------------------------------------------
-# WandB logging
-# ---------------------------------------------------------------------------
-
 def _log_result(result) -> None:
     b = result.backend
     agg = result.agg
-
-    # Per-agent metrics
     for r in result.agent_results:
         if r.status == "success":
             wandb.log({
@@ -77,7 +76,6 @@ def _log_result(result) -> None:
                 f"{b}/agent_{r.agent_id}/output_tokens": r.output_tokens,
             })
 
-    # Aggregate metrics
     wandb.log({
         f"{b}/agg/success_rate":          agg.success_rate,
         f"{b}/agg/oom_count":             agg.oom_count,
@@ -90,7 +88,6 @@ def _log_result(result) -> None:
         f"{b}/agg/peak_vram_gb":          agg.peak_vram_gb,
         f"{b}/agg/wall_time_seconds":     result.wall_time_seconds,
     })
-
 
 def _print_summary(result) -> None:
     agg = result.agg
@@ -105,13 +102,11 @@ def _print_summary(result) -> None:
     print(f"  Wall    : {result.wall_time_seconds:.1f}s")
     print(f"{'='*55}\n")
 
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
-async def main(backends_to_run: list[str], n_agents: int) -> None:
-    # -- Load shared setup --------------------------------------------------
+async def main(backends_to_run: list[str], n_agents: int, draft_model: str) -> None:
     if not os.path.exists(AGENTS_FILE):
         raise FileNotFoundError(f"{AGENTS_FILE} not found.")
 
@@ -122,8 +117,6 @@ async def main(backends_to_run: list[str], n_agents: int) -> None:
         AgentSpec(id=a["id"], persona=a["persona"])
         for a in raw_agents[:n_agents]
     ]
-    if len(agents) < n_agents:
-        print(f"Warning: only {len(agents)} agents available (requested {n_agents}).")
 
     shared_code_prefix = _load_code_prefix()
     print(f"Loaded {len(agents)} agents | prefix length: {len(shared_code_prefix)} chars")
@@ -133,10 +126,10 @@ async def main(backends_to_run: list[str], n_agents: int) -> None:
         shared_code_prefix=shared_code_prefix,
         max_new_tokens=MAX_NEW_TOKENS,
         model_path=MODEL_PATH,
+        draft_model_path=draft_model,
         device=DEVICE,
     )
 
-    # -- WandB init ---------------------------------------------------------
     wandb.init(
         entity=WANDB_ENTITY,
         project=WANDB_PROJECT,
@@ -147,14 +140,13 @@ async def main(backends_to_run: list[str], n_agents: int) -> None:
             "max_new_tokens": MAX_NEW_TOKENS,
             "backends":      backends_to_run,
             "prefix_chars":  len(shared_code_prefix),
+            "draft_model":   draft_model,
         },
     )
 
-    # -- Run each backend sequentially (one GPU) ----------------------------
     all_results = []
     for name in backends_to_run:
         if name not in REGISTRY:
-            print(f"[run_all] Unknown backend '{name}', skipping.")
             continue
         print(f"\n>>> Starting backend: {name} ({n_agents} agents) <<<\n")
         result = await REGISTRY[name](cfg)
@@ -164,7 +156,6 @@ async def main(backends_to_run: list[str], n_agents: int) -> None:
 
     wandb.finish()
 
-    # -- Final cross-backend comparison table -------------------------------
     print("\n" + "="*55)
     print(f"  {'Backend':<14} {'tok/s':>8} {'p50 TTFT':>10} {'PPL':>8} {'VRAM GB':>9}")
     print("  " + "-"*51)
@@ -177,21 +168,11 @@ async def main(backends_to_run: list[str], n_agents: int) -> None:
         )
     print("="*55 + "\n")
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--backends",
-        nargs="+",
-        default=list(REGISTRY.keys()),
-        choices=list(REGISTRY.keys()),
-        help="Which backends to run (default: all registered)",
-    )
-    parser.add_argument(
-        "--n-agents",
-        type=int,
-        default=50,
-        help="Number of agents to simulate (default: 50)",
-    )
+    parser.add_argument("--backends", nargs="+", default=list(REGISTRY.keys()), choices=list(REGISTRY.keys()))
+    parser.add_argument("--n-agents", type=int, default=50)
+    parser.add_argument("--draft-model", type=str, default="Qwen/Qwen2.5-0.5B")
+    
     args = parser.parse_args()
-    asyncio.run(main(args.backends, args.n_agents))
+    asyncio.run(main(args.backends, args.n_agents, args.draft_model))
