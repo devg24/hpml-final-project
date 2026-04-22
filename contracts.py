@@ -14,6 +14,7 @@ class ExperimentConfig:
     shared_code_prefix: str
     max_new_tokens: int = 256
     model_path: str = "./qwen-7b"
+    draft_model_path: str | None = None 
     device: str = "cuda:0"
 
 

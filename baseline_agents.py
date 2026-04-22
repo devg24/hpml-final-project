@@ -15,12 +15,16 @@ import torch.nn.modules.module as module
 parser = argparse.ArgumentParser()
 parser.add_argument("--optim", type=str, default="none", choices=["none", "quantization"],
                     help="Optimization to apply: 'none' (default bfloat16) or 'quantization' (INT4 NF4)")
+
+parser.add_argument("--agents", type=int, default=15, help="Number of concurrent agents to simulate (default: 15)")
+
+
 args = parser.parse_args()
 
 # --- Configuration ---
 MODEL_PATH = "./qwen-7b"
 WANDB_PROJECT = "hpml-final-project"
-CONCURRENT_AGENTS = 15
+CONCURRENT_AGENTS = args.agents
 MAX_NEW_TOKENS = 256
 DEVICE = "cuda:0"
 # MAX_INPUT_TOKENS = 1020     # <-- Controls max INPUT length (Prompt + Code)
