@@ -47,7 +47,7 @@ AGENTS_FILE     = "agents_config.json"
 WANDB_PROJECT   = "hpml-final-project"
 WANDB_ENTITY    = "ak5446-columbia-university"
 MAX_NEW_TOKENS  = 256
-DEVICE          = "cuda:0"
+DEVICE          = "cuda"
 
 # ---------------------------------------------------------------------------
 # Shared code prefix  (same as original — first 600 lines of torch.nn.Module)

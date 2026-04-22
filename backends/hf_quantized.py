@@ -6,6 +6,7 @@ Generation harness is identical to hf_baseline; only the model-load path differs
 """
 
 import asyncio
+import concurrent.futures
 import time
 import traceback
 
@@ -144,19 +145,21 @@ async def run_hf_quantized(cfg: ExperimentConfig) -> ExperimentResult:
     base_ppl = calculate_perplexity(model, base_inputs["input_ids"])
     print(f"[{BACKEND_NAME}] Base PPL: {base_ppl:.4f}")
 
-    # Dispatch all agents concurrently
+    # Dispatch all agents concurrently with a custom executor to bypass default threading limits
     wall_start = time.time()
-    tasks = [
-        asyncio.to_thread(_generate_one, agent, model, tokenizer, cfg)
-        for agent in cfg.agents
-    ]
-    raw = await asyncio.gather(*tasks)
+    loop = asyncio.get_running_loop()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(cfg.agents)) as executor:
+        tasks = [
+            loop.run_in_executor(executor, _generate_one, agent, model, tokenizer, cfg)
+            for agent in cfg.agents
+        ]
+        raw = await asyncio.gather(*tasks)
 
     # Sequential perplexity pass
     print(f"[{BACKEND_NAME}] Computing per-agent perplexity ...")
-    pending = [(res, ids, ilen) for res, ids, ilen in raw]
+    pending = list(raw)
     agent_results = [res for res, _, _ in raw]
-    compute_generation_perplexities(model, agent_results, pending, str(device))
+    compute_generation_perplexities(pending, model, str(device))
 
     wall_time = time.time() - wall_start
     peak_vram = torch.cuda.max_memory_allocated() / 1e9  # "auto" may span devices

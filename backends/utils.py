@@ -101,19 +101,22 @@ def compute_agg(
 # ---------------------------------------------------------------------------
 
 def compute_generation_perplexities(
-    model,
-    results: list[AgentResult],
     pending: list[tuple[AgentResult, torch.Tensor, int]],  # (result, full_ids_cpu, input_len)
+    model,
     device: str,
 ) -> None:
     """
     Mutates result.perplexity in-place.  Accepts the list of
     (AgentResult, full_ids_cpu, input_len) triples produced during generation.
     Runs sequentially to avoid stacking large tensors on GPU simultaneously.
+    Each full_ids_cpu tensor is freed from CPU RAM immediately after use,
+    matching the original code's del res["full_ids_cpu"] behaviour.
     """
     for result, full_ids_cpu, input_len in pending:
         if result.status != "success":
             continue
+        full_ids = None
+        labels = None
         try:
             full_ids = full_ids_cpu.to(device)
             labels = full_ids.clone()
@@ -123,5 +126,12 @@ def compute_generation_perplexities(
             result.perplexity = None
             result.error_trace = (result.error_trace or "") + "\nPPL: " + traceback.format_exc()
         finally:
-            del full_ids, labels
+            # Free GPU tensors unconditionally — None-check guards against
+            # the case where assignment failed before the variable was bound.
+            if full_ids is not None:
+                del full_ids
+            if labels is not None:
+                del labels
+            # Free the CPU tensor immediately (mirrors original del res["full_ids_cpu"])
+            del full_ids_cpu
             torch.cuda.empty_cache()
