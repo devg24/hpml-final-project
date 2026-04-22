@@ -6,6 +6,7 @@ Agents are dispatched via asyncio.to_thread (one OS thread per agent).
 """
 
 import asyncio
+import concurrent.futures
 import time
 import traceback
 
@@ -138,13 +139,15 @@ async def run_hf_baseline(cfg: ExperimentConfig) -> ExperimentResult:
     base_ppl = calculate_perplexity(model, base_inputs["input_ids"])
     print(f"[{BACKEND_NAME}] Base PPL: {base_ppl:.4f}")
 
-    # Dispatch all agents concurrently
+    # Dispatch all agents concurrently with a custom executor to bypass default threading limits
     wall_start = time.time()
-    tasks = [
-        asyncio.to_thread(_generate_one, agent, model, tokenizer, cfg)
-        for agent in cfg.agents
-    ]
-    raw = await asyncio.gather(*tasks)
+    loop = asyncio.get_running_loop()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(cfg.agents)) as executor:
+        tasks = [
+            loop.run_in_executor(executor, _generate_one, agent, model, tokenizer, cfg)
+            for agent in cfg.agents
+        ]
+        raw = await asyncio.gather(*tasks)
 
     # Sequential perplexity pass on generation outputs
     print(f"[{BACKEND_NAME}] Computing per-agent perplexity ...")
