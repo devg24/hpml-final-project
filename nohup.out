@@ -1,0 +1,84 @@
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/devgoyal/.netrc.
+wandb: Currently logged in as: dg3513 (dg3513-columbia-university) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run gr1kltwd
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in /home/devgoyal/hpml_final_project/wandb/run-20260422_220422-gr1kltwd
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run comparison_hf_bf16_hf_nf4_vllm_speculative_50agents
+wandb: ⭐️ View project at https://wandb.ai/ak5446-columbia-university/hpml-final-project
+wandb: 🚀 View run at https://wandb.ai/ak5446-columbia-university/hpml-final-project/runs/gr1kltwd
+wandb: Detected [openai] in use.
+wandb: Use W&B Weave for improved LLM call tracing. Install Weave with `pip install weave` then add `import weave` to the top of your script.
+wandb: For more information, check out the docs at: https://weave-docs.wandb.ai/
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loaded 50 agents | prefix length: 22863 chars
+
+>>> Starting backend: hf_bf16 (50 agents) <<<
+
+[hf_bf16] Loading tokenizer + model (./qwen-7b) ...
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:01<00:03,  1.08s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:02<00:02,  1.16s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:03<00:01,  1.21s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:04<00:00,  1.20s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:04<00:00,  1.19s/it]
+The following generation flags are not valid and may be ignored: ['temperature', 'top_p', 'top_k']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+[hf_bf16] Model loaded.
+[hf_bf16] Calculating base code perplexity ...
+[hf_bf16] Base PPL: 2.0473
+[hf_bf16] Computing per-agent perplexity ...
+
+=======================================================
+  Backend : hf_bf16
+  Agents  : 7/50 succeeded  |  43 OOM
+  TTFT    : avg 0.05s  p50 0.05s  p99 0.07s
+  Thruput : 1.4 tok/s
+  PPL     : agent avg 2.134  |  base code 2.047
+  VRAM    : 22.13 GB peak
+  Wall    : 196.6s
+=======================================================
+
+
+>>> Starting backend: hf_nf4 (50 agents) <<<
+
+[hf_nf4] Loading tokenizer + model (./qwen-7b) with NF4 ...
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:08,  2.94s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:06<00:06,  3.32s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:10<00:03,  3.54s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:13<00:00,  3.25s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:13<00:00,  3.28s/it]
+[hf_nf4] Model loaded.
+[hf_nf4] Calculating base code perplexity ...
+[hf_nf4] Base PPL: 2.1360
+[hf_nf4] Computing per-agent perplexity ...
+
+=======================================================
+  Backend : hf_nf4
+  Agents  : 14/50 succeeded  |  36 OOM
+  TTFT    : avg 0.05s  p50 0.05s  p99 0.08s
+  Thruput : 0.3 tok/s
+  PPL     : agent avg 1.904  |  base code 2.136
+  VRAM    : 19.88 GB peak
+  Wall    : 934.9s
+=======================================================
+
+
+>>> Starting backend: vllm (50 agents) <<<
+
+[vllm] Starting AsyncLLMEngine (prefix_caching=True) ...
+Traceback (most recent call last):
+  File "/home/devgoyal/hpml_final_project/run_all.py", line 178, in <module>
+    asyncio.run(main(args.backends, args.n_agents, args.draft_model))
+  File "/opt/conda/envs/hpml_fp/lib/python3.11/asyncio/runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/opt/conda/envs/hpml_fp/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/envs/hpml_fp/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/home/devgoyal/hpml_final_project/run_all.py", line 152, in main
+    result = await REGISTRY[name](cfg)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/devgoyal/hpml_final_project/backends/hf_vllm.py", line 125, in run_vllm
+    engine = AsyncLLMEngine.from_engine_args(_engine_args(cfg))
+                                             ^^^^^^^^^^^^^^^^^
+  File "/home/devgoyal/hpml_final_project/backends/hf_vllm.py", line 24, in _engine_args
+    return AsyncEngineArgs(
+           ^^^^^^^^^^^^^^^^
+TypeError: AsyncEngineArgs.__init__() got an unexpected keyword argument 'disable_log_requests'
+[1;34mwandb[0m: 
+[1;34mwandb[0m: 🚀 View run [33mcomparison_hf_bf16_hf_nf4_vllm_speculative_50agents[0m at: [34mhttps://wandb.ai/ak5446-columbia-university/hpml-final-project/runs/gr1kltwd[0m
+[1;34mwandb[0m: Find logs at: [1;35mwandb/run-20260422_220422-gr1kltwd/logs[0m

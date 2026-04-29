@@ -28,7 +28,7 @@ BACKEND_NAME = "hf_speculative"
 # ---------------------------------------------------------------------------
 
 def _load(cfg: ExperimentConfig):
-    print(f"[{BACKEND_NAME}] Loading tokenizer + target model ({cfg.model_path})...")
+    print(f"[{BACKEND_NAME}] Loading target tokenizer + model ({cfg.model_path})...")
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_path, trust_remote_code=True)
 
     # Load the main/target model
@@ -40,8 +40,9 @@ def _load(cfg: ExperimentConfig):
     )
     target_model.eval()
     
-    # Load the draft model
-    print(f"[{BACKEND_NAME}] Loading draft model ({cfg.draft_model_path})...")
+    # Load the draft model and its tokenizer (Universal Assisted Decoding)
+    print(f"[{BACKEND_NAME}] Loading draft tokenizer + model ({cfg.draft_model_path})...")
+    draft_tokenizer = AutoTokenizer.from_pretrained(cfg.draft_model_path, trust_remote_code=True)
     draft_model = AutoModelForCausalLM.from_pretrained(
         cfg.draft_model_path,
         device_map="auto",
@@ -51,7 +52,7 @@ def _load(cfg: ExperimentConfig):
     draft_model.eval()
 
     print(f"[{BACKEND_NAME}] Models loaded.")
-    return target_model, draft_model, tokenizer
+    return target_model, draft_model, tokenizer, draft_tokenizer
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +64,7 @@ def _generate_one(
     target_model,
     draft_model,
     tokenizer,
+    draft_tokenizer,
     cfg: ExperimentConfig,
 ) -> tuple[AgentResult, torch.Tensor | None, int | None]:
     full_prompt = (
@@ -82,6 +84,8 @@ def _generate_one(
             outputs = target_model.generate(
                 **inputs,
                 assistant_model=draft_model, # <-- Enables Speculative Decoding
+                tokenizer=tokenizer,         # Standard re-tokenization logic
+                assistant_tokenizer=draft_tokenizer, # <-- Enables Universal Assisted Decoding
                 max_new_tokens=cfg.max_new_tokens,
                 streamer=streamer,
                 do_sample=False,
@@ -140,7 +144,7 @@ def _generate_one(
 
 async def run_speculative(cfg: ExperimentConfig) -> ExperimentResult:
     torch.cuda.reset_peak_memory_stats(cfg.device)
-    target_model, draft_model, tokenizer = _load(cfg)
+    target_model, draft_model, tokenizer, draft_tokenizer = _load(cfg)
 
     # Base-code perplexity
     print(f"[{BACKEND_NAME}] Calculating base code perplexity ...")
@@ -156,7 +160,7 @@ async def run_speculative(cfg: ExperimentConfig) -> ExperimentResult:
     loop = asyncio.get_running_loop()
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(cfg.agents)) as executor:
         tasks = [
-            loop.run_in_executor(executor, _generate_one, agent, target_model, draft_model, tokenizer, cfg)
+            loop.run_in_executor(executor, _generate_one, agent, target_model, draft_model, tokenizer, draft_tokenizer, cfg)
             for agent in cfg.agents
         ]
         raw = await asyncio.gather(*tasks)
