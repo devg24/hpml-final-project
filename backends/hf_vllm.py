@@ -25,10 +25,11 @@ def _engine_args(cfg: ExperimentConfig) -> AsyncEngineArgs:
         model=cfg.model_path,
         dtype="bfloat16",
         enable_prefix_caching=True,   # RadixAttention — prefix KV shared across agents
-        max_model_len=4096,           # prefix (~600 lines) + 256 new tokens fits comfortably
-        gpu_memory_utilization=0.90,
+        max_model_len=8192,           # Increased to accommodate the 6k token prefix
+        gpu_memory_utilization=0.80,  # Lowered to 80% to leave room for prefill activations
+        enforce_eager=True,           # Disables CUDA graphs to save ~1GB of VRAM
         trust_remote_code=True,
-        disable_log_requests=True,
+        disable_log_stats=True,       # Correct argument to disable periodic stat logging
     )
 
 
