@@ -22,7 +22,12 @@ if LIB_PATH not in os.environ.get("LD_LIBRARY_PATH", ""):
 import argparse
 import asyncio
 import inspect
+import io
 import json
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 import torch
 import wandb
@@ -89,6 +94,57 @@ def _log_result(result) -> None:
         f"{b}/agg/wall_time_seconds":     result.wall_time_seconds,
     })
 
+def _make_bar_chart(backends: list[str], values: list[float], title: str, ylabel: str) -> wandb.Image:
+    fig, ax = plt.subplots(figsize=(max(4, len(backends) * 1.5), 5))
+    bars = ax.bar(backends, values, color=plt.cm.tab10.colors[:len(backends)])
+    ax.set_title(title, fontsize=13, fontweight="bold")
+    ax.set_ylabel(ylabel)
+    ax.set_xlabel("Backend")
+    for bar, val in zip(bars, values):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
+                f"{val:.3g}", ha="center", va="bottom", fontsize=10)
+    plt.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=120)
+    plt.close(fig)
+    buf.seek(0)
+    return wandb.Image(buf)
+
+
+def _log_comparison_charts(all_results: list) -> None:
+    """Log bar charts comparing all backends as W&B images."""
+    backends = [r.backend for r in all_results]
+
+    agg_metrics = [
+        ("avg_throughput",       "Avg Throughput (tok/s)",          "tok/s"),
+        ("avg_perplexity",       "Avg Agent Perplexity",            "perplexity"),
+        ("base_code_perplexity", "Base Code Perplexity",            "perplexity"),
+        ("avg_ttft",             "Avg Time-to-First-Token (s)",     "seconds"),
+        ("p50_ttft",             "P50 TTFT (s)",                    "seconds"),
+        ("p99_ttft",             "P99 TTFT (s)",                    "seconds"),
+        ("peak_vram_gb",         "Peak VRAM (GB)",                  "GB"),
+        ("success_rate",         "Success Rate",                    "fraction"),
+        ("oom_count",            "OOM Count",                       "count"),
+    ]
+
+    charts = {}
+
+    for attr, title, ylabel in agg_metrics:
+        values = [getattr(r.agg, attr) for r in all_results]
+        charts[f"comparison/{attr}"] = _make_bar_chart(backends, values, title, ylabel)
+
+    wall_values = [r.wall_time_seconds for r in all_results]
+    charts["comparison/wall_time_seconds"] = _make_bar_chart(
+        backends, wall_values, "Wall Time (s)", "seconds"
+    )
+
+    success_values = [int(r.agg.success_rate * len(r.agent_results)) for r in all_results]
+    charts["comparison/successful_agents"] = _make_bar_chart(
+        backends, success_values, "Successful Agents (count)", "agents"
+    )
+
+    wandb.log(charts)
+
 def _print_summary(result) -> None:
     agg = result.agg
     n = len(result.agent_results)
@@ -154,6 +210,7 @@ async def main(backends_to_run: list[str], n_agents: int, draft_model: str) -> N
         _log_result(result)
         all_results.append(result)
 
+    _log_comparison_charts(all_results)
     wandb.finish()
 
     print("\n" + "="*55)
