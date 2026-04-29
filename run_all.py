@@ -38,6 +38,7 @@ from backends.hf_baseline  import run_hf_baseline
 from backends.hf_quantized import run_hf_quantized
 from backends.hf_speculative import run_speculative
 from backends.hf_vllm import run_vllm
+from backends.hf_vllm_bnb_nf4 import run_vllm_bnb_nf4
 
 # ---------------------------------------------------------------------------
 # Backend registry
@@ -48,6 +49,7 @@ REGISTRY: dict[str, callable] = {
     "hf_nf4":      run_hf_quantized,
     "vllm":        run_vllm,
     "speculative": run_speculative,
+    "hf_vllm_bnb_nf4": run_vllm_bnb_nf4,
 }
 
 # ---------------------------------------------------------------------------
