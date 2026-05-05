@@ -1,4 +1,4 @@
-# HPML Final Project: [Project Title]
+# HPML Final Project: Benchmarking LLM Inference Serving Strategies for Concurrent Agentic Workloads
 
 > **Course:** High Performance Machine Learning
 > **Semester:** Spring 2026
@@ -8,11 +8,12 @@
 
 ## Team Information
 
-- **Team Name:** [Team Name]
+- **Team Name:** [Benchmarking LLM Inference Serving Strategies for Concurrent Agentic Workloads]
 - **Members:**
-  - Dev Goyal (dg3513) — *role / area of contribution*
-  - Anoushka Khajanachi (ak5446) — *role / area of contribution*
-  - Alessandro Castillo ([UNI 3]) — *role / area of contribution*
+  - Dev Goyal (dg3513) — *developer / worked on vLLM and vLLM + quantiztaion experiments*
+  - Anoushka Khajanachi (ak5446) — *developer/ worked on speculative decoding and baseline experiments*
+  - Alessandro Castillo ([UNI 3]) — *developer / worked on quantization experiments and ensuring tables were being made in wandB*
+  Everyone contributed to writing the final paper. 
 
 ## Submission
 
