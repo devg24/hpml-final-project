@@ -12,7 +12,7 @@
 - **Members:**
   - Dev Goyal (dg3513) — *developer / worked on vLLM and vLLM + quantiztaion experiments*
   - Anoushka Khajanachi (ak5446) — *developer/ worked on speculative decoding and baseline experiments*
-  - Alessandro Castillo ([UNI 3]) — *developer / worked on quantization experiments and ensuring tables were being made in wandB*
+  - Alessandro Castillo (agc2166) — *developer / worked on quantization experiments and ensuring tables were being made in wandB*
   Everyone contributed to writing the final paper. 
 
 ## Submission
