@@ -8,7 +8,7 @@
 
 ## Team Information
 
-- **Team Name:** [Benchmarking LLM Inference Serving Strategies for Concurrent Agentic Workloads]
+- **Team Name:** Benchmarking LLM Inference Serving Strategies for Concurrent Agentic Workloads
 - **Members:**
   - Dev Goyal (dg3513) — *developer / worked on vLLM and vLLM + quantiztaion experiments*
   - Anoushka Khajanachi (ak5446) — *developer/ worked on speculative decoding and baseline experiments*
