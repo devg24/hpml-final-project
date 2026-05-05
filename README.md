@@ -24,6 +24,23 @@
 The final report PDF and the presentation file are checked into the `deliverables/` folder of this repository **and** uploaded to CourseWorks.
 
 ---
+### AI Use Disclosure
+
+**Did your team use any AI tool in completing this project?**
+
+- [ ] No, we did not use any AI tool.
+- [x] Yes, we used AI assistance as described below.
+
+**Tool(s) used:** Claude, Gemini
+
+**Specific purpose:** debugged environment issues, refactored and helped us modularize project structure. 
+
+**Sections affected:** scripts/run_benchmarks_final.sh, src/
+
+**How we verified correctness:** manually verified script paths, ran help commands to check imports, and reran all experiments to confirm correctness.
+
+By submitting this project, the team confirms that the analysis, interpretations, and conclusions are our own, and that any AI assistance is fully disclosed above. The same disclosure block appears as an appendix in the final report.
+---
 
 ## 1. Problem Statement
 
@@ -212,44 +229,7 @@ bash scripts/run_benchmarks_final.sh
 - All experiment logs and results are stored in `results/`.
 - Wandb tokens and other secrets should be set as environment variables.
 
-### AI Use Disclosure
 
-**Did your team use any AI tool in completing this project?**
-
-- [ ] No, we did not use any AI tool.
-- [x] Yes, we used AI assistance as described below.
-
-**Tool(s) used:** Claude, Gemini
-
-**Specific purpose:** debugged environment issues, refactored project structure
-
-**Sections affected:** README.md, scripts/run_benchmarks_final.sh, src/
-
-**How we verified correctness:** manually verified script paths, ran help commands to check imports, and reran all experiments to confirm correctness.
-
-By submitting this project, the team confirms that the analysis, interpretations, and conclusions are our own, and that any AI assistance is fully disclosed above. The same disclosure block appears as an appendix in the final report.
-
-### License
-
-Released under the MIT License. See [`LICENSE`](LICENSE).
-
-### Citation
-
-If you build on this work, please cite:
-
-```bibtex
-@misc{teamname2026hpml,
-  title  = {[Project Title]},
-  author = {Last1, First1 and Last2, First2 and Last3, First3},
-  year   = {2026},
-  note   = {HPML Spring 2026 Final Project, Columbia University},
-  url    = {https://github.com/devg24/hpml-final-project.git}
-}
-```
-
-### Contact
-
-Open a GitHub Issue or email *[team-contact@columbia.edu]*.
 
 ---
 
