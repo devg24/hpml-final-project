@@ -1,0 +1,27 @@
+# HPML Final Project: Experiment Configuration
+
+# Model Settings
+model_path: "./qwen-7b"
+draft_model_path: "Qwen/Qwen2.5-0.5B"
+
+# Runtime Settings
+n_agents: 50
+max_new_tokens: 256
+device: "cuda"
+
+# Benchmarking Backends
+backends:
+  - hf_bf16
+  - hf_nf4
+  - vllm
+  - speculative
+  - hf_vllm_bnb_nf4
+
+# Weights & Biases Configuration
+wandb:
+  project: "hpml-final-project"
+  entity: "ak5446-columbia-university"
+
+# Data Configuration
+agents_config: "agents_config.json"
+shared_code_prefix_limit: 600 # lines

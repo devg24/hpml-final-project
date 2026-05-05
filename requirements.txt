@@ -1,0 +1,11 @@
+torch>=2.0.0
+transformers
+vllm
+bitsandbytes
+wandb
+numpy
+matplotlib
+accelerate
+fastapi
+uvicorn
+pydantic
