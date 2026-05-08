@@ -18,7 +18,7 @@
 ## Submission
 
 - **GitHub repository:** [https://github.com/devg24/hpml-final-project.git](https://github.com/devg24/hpml-final-project.git)
-- **Final report:** [deliverables/HPML Final Project Paper.pdf'](https://github.com/devg24/hpml-final-project/blob/d644fb9e19876f5c465b96d8cb45fa71cd1740c3/deliverables/HPML%20Final%20Project.pdf)
+- **Final report:** [deliverables/HPML Final Project Paper.pdf'](https://github.com/devg24/hpml-final-project/blob/a1fadedd94a6f4615fcba1f78a7f0123df1022c1/deliverables/HPML_Final_Project.pdf)
 - **Final presentation:** [`deliverables/HPML_Final_Presentation.pptx`](https://github.com/devg24/hpml-final-project/blob/d644fb9e19876f5c465b96d8cb45fa71cd1740c3/deliverables/HPML%20Final%20Project%20PowerPoint.pdf)
 - **Experiment-tracking dashboard:** [https://wandb.ai/ak5446-columbia-university/hpml-final-project](https://wandb.ai/ak5446-columbia-university/hpml-final-project)
 
